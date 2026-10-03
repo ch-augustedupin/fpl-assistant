@@ -41,7 +41,7 @@ jobs:
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python notify.py ${{ inputs.force && '--force' || '' }} --channels "${{ inputs.channels || 'email,whatsapp' }}"
-      - name: Commit the sent marker (reports stay private: never committed)
+      - name: Commit the sent marker (reports are never committed)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
