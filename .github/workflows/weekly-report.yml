@@ -1,4 +1,5 @@
 name: FPL report before each deadline
+# Reports are never committed or printed here: the repo is public.
 
 on:
   schedule:
