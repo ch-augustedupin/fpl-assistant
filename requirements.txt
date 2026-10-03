@@ -1,0 +1,4 @@
+requests
+pandas
+pulp>=2.8,<4
+markdown
