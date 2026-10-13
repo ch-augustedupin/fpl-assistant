@@ -54,3 +54,11 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
   Full report as HTML with the summary box on top. WhatsApp: CallMeBot (`WHATSAPP_PHONE` with country code,
   `CALLMEBOT_APIKEY`), summary only (`reports/GW{n}.summary.txt`, ~400 chars).
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
+
+## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)
+- João Pedro was benched on a 24-day-old "75%" flag and scored 12: doubtful flags older than `STALE_DAYS` now fade,
+  and 0-minute games after injury news are absences, not rotation (they were penalised twice).
+- Szoboszlai's injury surfaced on matchday, after the deadline: not predictable. Bench order is the only protection.
+- Captain: Fernandes (6.2 xPts) over Haaland (5.5) while the opponent captained Haaland. When favoured, the report now
+  copies the opponent's last captain unless ours is more than `CAPTAIN_MATCH_GAP` better.
+- The Thursday report goes out before Friday press conferences. The user was offered a deadline-eve update.
