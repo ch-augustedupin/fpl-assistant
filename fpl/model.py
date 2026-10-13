@@ -6,6 +6,7 @@ single haul doesn't dominate and new signings still get a sensible estimate.
 import math
 import unicodedata
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 DECAY = 0.8          # weight of a gameweek relative to the one after it (form = recent GWs matter most)
@@ -14,6 +15,7 @@ TEAM_PRIOR_GAMES = 6  # shrink team strength toward its pre-season rating by thi
 PAST_GAMES_MAX = 8   # last season's per-90 rates count as at most this many matches
 POS_PRIOR_GAMES = 1.5
 DC_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
+STALE_DAYS = 7       # a "doubtful" flag older than this fades (+25 points of chance per extra week)
 
 
 def norm(s):
@@ -53,6 +55,8 @@ class Model:
         self.europe = {tid for tid, t in self.teams.items() if t["short_name"] in set(europe_teams)}
         self.fix_by_id = {f["id"]: f for f in fixtures}
         self.players = {p["id"]: p for p in boot["elements"]}
+        nxt = next((e for e in boot["events"] if e["is_next"]), None)
+        self.next_deadline = datetime.fromisoformat(nxt["deadline_time"].replace("Z", "+00:00")) if nxt else None
         self._team_strength()
         self._player_rates()
 
@@ -159,7 +163,14 @@ class Model:
 
     def _minutes(self, pid, rows, past):
         """Probability of starting / coming on, and minutes when starting, from the last 6 GWs."""
-        recent = sorted(rows, key=lambda r: r["round"])[-6:]
+        # A 0-minute game played after FPL posted injury/suspension news is an absence, not rotation.
+        # Counting it would penalise the player twice, on top of the flag (João Pedro, GW6 2026/27).
+        # Without news, a missed game still counts: the player may simply have lost his place.
+        added = self.players[pid]["news_added"] if self.use_flags else None
+        since = datetime.fromisoformat(added.replace("Z", "+00:00")) - timedelta(days=3) if added else None
+        recent = [r for r in sorted(rows, key=lambda r: r["round"]) if not (
+            r["minutes"] == 0 and since and datetime.fromisoformat(r["kickoff_time"].replace("Z", "+00:00")) >= since)]
+        recent = recent[-6:]
         if len(recent) >= 2:
             ws = [DECAY ** (self.cutoff - r["round"]) for r in recent]
             tw = sum(ws)
@@ -195,6 +206,13 @@ class Model:
         return {"xgi90_4": xgi90_4, "pts_last3": pts_last3, "trend": trend}
 
     # ---------- availability ----------
+    def news_age(self, pid):
+        """Days between the player's injury news and the next deadline (None if no dated news)."""
+        added = self.players[pid]["news_added"]
+        if not added or not self.next_deadline:
+            return None
+        return (self.next_deadline - datetime.fromisoformat(added.replace("Z", "+00:00"))).total_seconds() / 86400
+
     def availability(self, pid, offset):
         """Chance of being available `offset` GWs after the next one (0 = next GW)."""
         if not self.use_flags:
@@ -208,6 +226,10 @@ class Model:
         c = p["chance_of_playing_next_round"]
         if c is None:
             c = 100 if p["status"] in ("a", "d") else 0
+        # FPL leaves "doubtful" flags up for weeks; an old one says little, so it fades after the first week
+        age = self.news_age(pid)
+        if p["status"] == "d" and age is not None and age > STALE_DAYS:
+            c = min(100, c + 25 * (age - STALE_DAYS) / 7)
         news = p["news"].lower()
         long_term = "unknown return" in news or "season" in news
         if offset == 0:
@@ -299,7 +321,9 @@ class Model:
         elif p["status"] != "a" or p["news"]:
             c = p["chance_of_playing_next_round"]
             date = (p["news_added"] or "")[:10]
-            f.append(f"⚠ {c if c is not None else '?'}% — {p['news'] or p['status']} ({date})")
+            age = self.news_age(pid)
+            stale = f"; news {age:.0f} days old, probably outdated — check" if age and age > STALE_DAYS else ""
+            f.append(f"⚠ {c if c is not None else '?'}% — {p['news'] or p['status']} ({date}{stale})")
         if 0.35 <= r["p_start"] < 0.8:
             f.append(f"rotation risk (starts {r['p_start']:.0%})")
         elif r["p_start"] >= 0.8 and r["mins_start"] < 68:

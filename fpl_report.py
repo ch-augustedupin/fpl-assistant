@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 FT_BANK_VALUE = 1.5  # points a saved free transfer is worth next week
 HIT_MARGIN = 3      # extra predicted points a -4 hit must earn, since predictions are noisy
+CAPTAIN_MATCH_GAP = 1.0  # when favoured in H2H, copy the opponent's captain unless ours is this much better
 
 lines = []
 
@@ -172,6 +173,29 @@ def main():
     # ---- line-up
     rec = plans[best_k]
     lu = lineup(players, xp1, rec["squad"])
+
+    # H2H captain rule: when favoured, don't gamble against the opponent's captain for a small edge.
+    # (GW6 2026/27: a 0.7 xPts edge on a different captain turned a draw into a 49–54 loss.)
+    prev = captain_note = None
+    if opp:
+        opp_id, opp_name, opp_mgr = opp
+        opp_picks = api.entry_picks(opp_id, gw)["picks"]
+        opp_squad = others.get(opp_id) or [p["element"] for p in opp_picks]
+        prev = h2h.preview(players, xp1, lu["xi"], lu["captain"], opp_squad)
+        last_cap = next((p["element"] for p in opp_picks if p["is_captain"]), None)
+        if last_cap in prev["opp"]["xi"]:  # managers mostly keep their captain: better guess than the model's
+            prev["opp"]["captain"] = last_cap
+        oc, mine = prev["opp"]["captain"], lu["captain"]
+        if prev["p_win"] >= 0.5 and oc != mine and oc in lu["xi"] and xp1[mine] - xp1[oc] <= CAPTAIN_MATCH_GAP:
+            lu["captain"], lu["vice"] = oc, mine
+            lu["xp"] += xp1[oc] - xp1[mine]
+            prev = h2h.preview(players, xp1, lu["xi"], oc, opp_squad)
+            prev["opp"]["captain"] = oc
+            captain_note = (f"Captain switched from {players[mine]['web_name']} ({xp1[mine]:.1f}) to "
+                            f"{players[oc]['web_name']} ({xp1[oc]:.1f}): you're the favourite and your opponent "
+                            f"captained him last week, so matching them protects your lead for only "
+                            f"{xp1[mine] - xp1[oc]:.1f} xPts.")
+
     out(f"## GW{next_gw} line-up (with the recommended transfers)  —  predicted {lu['xp']:.1f} pts")
     out(f"Captain: {name(lu['captain'])} {xp1[lu['captain']]:.1f} xPts  ·  "
         f"Vice: {name(lu['vice'])} {xp1[lu['vice']]:.1f}")
@@ -185,11 +209,10 @@ def main():
 
     # ---- H2H
     if opp:
-        opp_id, opp_name, opp_mgr = opp
-        prev = h2h.preview(players, xp1, lu["xi"], lu["captain"], others.get(opp_id) or
-                           [p["element"] for p in api.entry_picks(opp_id, gw)["picks"]])
         o = prev["opp"]
         out(f"## H2H GW{next_gw}: vs {opp_name} ({opp_mgr})")
+        if captain_note:
+            out(captain_note)
         out(f"Predicted {prev['my_xp']:.1f} – {o['xp']:.1f}  ·  rough win chance {prev['p_win']:.0%}  "
             f"(their squad as of GW{gw}; their new transfers are hidden until the deadline)")
         out(f"Their likely captain: {name(o['captain'])}  ·  shared starters (cancel out): "
