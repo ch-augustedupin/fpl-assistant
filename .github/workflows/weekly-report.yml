@@ -13,6 +13,11 @@ on:
       channels:
         description: "Channels to send (test one at a time)"
         default: "email,whatsapp"
+      phase:
+        description: "With force: which message to test"
+        type: choice
+        options: [main, friday]
+        default: main
 
 permissions:
   contents: write
@@ -40,7 +45,7 @@ jobs:
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: python notify.py ${{ inputs.force && '--force' || '' }} --channels "${{ inputs.channels || 'email,whatsapp' }}"
+        run: python notify.py ${{ inputs.force && '--force' || '' }} --phase "${{ inputs.phase || 'main' }}" --channels "${{ inputs.channels || 'email,whatsapp' }}"
       - name: Commit the sent marker (reports are never committed)
         run: |
           git config user.name "github-actions[bot]"
