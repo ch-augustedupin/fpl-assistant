@@ -47,8 +47,13 @@ and no transfer plans public: reports/ is git-ignored, notify.py captures the re
 and the README example is made up. Keep it that way. The bot commits `state/sent.txt` — `git pull` before editing.
 
 ## Delivery (`notify.py` + `.github/workflows/weekly-report.yml`)
-- Actions runs every 2 h; `notify.py` sends once per GW when the deadline is 2–38 h away (Saturday 10:00 UTC
-  deadline → Thursday evening Bogotá). `state/sent.txt` lists GWs already sent; the bot commits only that.
+- Actions runs hourly (GitHub actually fires every ~2–6 h). `notify.py` phases: **main** when the deadline is 1–38 h
+  away (Thursday evening Bogotá), **friday** when 1–12 h away and main already went out (Friday 17:00+ Bogotá).
+  `state/sent.txt` lines `<gw> <phase>-<channel>` (bare `<gw>` = all, legacy); a failed channel retries every run.
+  Friday compares with `state/GW{n}.fingerprint.json` (HMAC of each decision, key derived from RESEND_API_KEY or
+  CALLMEBOT_APIKEY; rotating that secret makes one Friday report "everything changed"). The bot commits only `state/`.
+- `fpl_report.py` writes `reports/GW{n}.json` (transfers, captain, vice, XI, bench, squad statuses) for the comparison.
+- CallMeBot outages: HTTP 207/208 with "Service is down" (seen 8–15 Oct 2026). Only HTTP 200 + "queued" counts.
 - Email: Resend API if `RESEND_API_KEY` is set (from onboarding@resend.dev to the account owner's address; Gmail
   refused SMTP logins from GitHub runners with the correct app password), else Gmail SMTP with an app password (secrets `GMAIL_USER`, `GMAIL_APP_PASSWORD`, optional `MAIL_TO`).
   Full report as HTML with the summary box on top. WhatsApp: CallMeBot (`WHATSAPP_PHONE` with country code,
@@ -61,4 +66,4 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
 - Szoboszlai's injury surfaced on matchday, after the deadline: not predictable. Bench order is the only protection.
 - Captain: Fernandes (6.2 xPts) over Haaland (5.5) while the opponent captained Haaland. When favoured, the report now
   copies the opponent's last captain unless ours is more than `CAPTAIN_MATCH_GAP` better.
-- The Thursday report goes out before Friday press conferences. The user was offered a deadline-eve update.
+- The Thursday report goes out before Friday press conferences, so the user asked for the Friday update (phase friday).

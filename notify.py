@@ -1,15 +1,24 @@
-"""Send the weekly report ~36 h before each FPL deadline: full report by email, summary by WhatsApp.
+"""Send the FPL report before each deadline, in two steps:
 
-Run often (GitHub Actions every 2 h); it only does work once per gameweek, when the deadline is near.
+1. ~36 h before (Thursday evening for Saturday deadlines): full report by email, summary by WhatsApp.
+2. ~12 h before (Friday evening): a short update after the press conferences. If transfers, captain,
+   line-up or a squad player's injury status changed since step 1: what changed by WhatsApp + the new
+   report by email. Otherwise one WhatsApp line: "no changes".
 
-    python notify.py              # send if due
-    python notify.py --force      # send now regardless of timing (a test: doesn't mark the GW as sent)
-    python notify.py --dry-run    # build everything, print instead of sending
+Run often (GitHub Actions every hour). Each step and channel is sent once; a channel that fails (e.g.
+CallMeBot down) is retried on every later run until the deadline.
+
+    python notify.py                          # send whatever is due
+    python notify.py --force [--phase friday] # test now (doesn't mark anything as sent)
+    python notify.py --dry-run                # build everything, print instead of sending
 
 Environment (GitHub secrets): GMAIL_USER, GMAIL_APP_PASSWORD, [MAIL_TO], WHATSAPP_PHONE, CALLMEBOT_APIKEY.
 A channel whose secrets are missing is skipped with a warning.
 """
 import argparse
+import hashlib
+import hmac
+import json
 import os
 import re
 import smtplib
@@ -26,26 +35,67 @@ from fpl import api
 
 ROOT = Path(__file__).resolve().parent
 SENT = ROOT / "state" / "sent.txt"
-SEND_HOURS_BEFORE = 38  # first run inside this window sends (Sat 10:00 UTC deadline -> Thu ~20:00 UTC = 15:00 Bogotá)
-MIN_HOURS_BEFORE = 2
+MAIN_HOURS_BEFORE = 38    # Sat 10:00 UTC deadline -> from Thu 20:00 UTC (15:00 Bogotá)
+FRIDAY_HOURS_BEFORE = 12  # Sat 10:00 UTC deadline -> from Fri 22:00 UTC (17:00 Bogotá)
+MIN_HOURS_BEFORE = 1
+CHANNELS = ("email", "whatsapp")
 
 
-def sent_gws():
-    return {int(x) for x in SENT.read_text().split()} if SENT.exists() else set()
+# ---------- what has been sent: state/sent.txt lines "<gw> <phase>-<channel>" (a bare "<gw>" = all) ----------
+def sent_items():
+    items = set()
+    for line in (SENT.read_text().splitlines() if SENT.exists() else []):
+        parts = line.split()
+        if parts:
+            items.add((int(parts[0]), parts[1] if len(parts) > 1 else "*"))
+    return items
 
 
-def due(force):
-    boot = api.bootstrap()
-    nxt = next((e for e in boot["events"] if e["is_next"]), None)
-    if not nxt:
-        print("Season over — nothing to send.")
-        return None
-    deadline = datetime.fromisoformat(nxt["deadline_time"].replace("Z", "+00:00"))
-    hours = (deadline - datetime.now(timezone.utc)).total_seconds() / 3600
-    print(f"GW{nxt['id']} deadline in {hours:.1f} h; already sent: {nxt['id'] in sent_gws()}")
-    if force or (MIN_HOURS_BEFORE <= hours <= SEND_HOURS_BEFORE and nxt["id"] not in sent_gws()):
-        return nxt["id"]
-    return None
+def is_sent(gw, item):
+    items = sent_items()
+    return (gw, item) in items or (gw, "*") in items
+
+
+def mark_sent(gw, item):
+    items = sent_items() | {(gw, item)}
+    SENT.parent.mkdir(exist_ok=True)
+    SENT.write_text("".join(f"{g} {i}\n" if i != "*" else f"{g}\n" for g, i in sorted(items)))
+
+
+# ---------- Thursday's decisions, kept as keyed hashes: the repo is public, the plan must not be readable ----------
+def _key():
+    secret = os.environ.get("RESEND_API_KEY") or os.environ.get("CALLMEBOT_APIKEY") or ""
+    return hashlib.sha256(("fpl-fingerprint:" + secret.strip()).encode()).digest() if secret else None
+
+
+def _h(key, value):
+    return hmac.new(key, json.dumps(value, sort_keys=True, ensure_ascii=False).encode(), "sha256").hexdigest()[:16]
+
+
+def fingerprint(dec, key):
+    return {"transfers": _h(key, dec["transfers"]), "captain": _h(key, dec["captain"]), "vice": _h(key, dec["vice"]),
+            "xi": _h(key, dec["xi"]), "bench": _h(key, dec["bench"]),
+            "status": {_h(key, pid): _h(key, [v["chance"], v["news"]]) for pid, v in dec["status"].items()}}
+
+
+def changes_since(dec, old, key):
+    """Human-readable list of what differs from the stored fingerprint (new values only)."""
+    ch = []
+    if _h(key, dec["transfers"]) != old["transfers"]:
+        ch.append("Transfers now: " + (", ".join(f"{o} → {i}" for o, i in dec["transfers"])
+                                       or "none (roll the transfer)"))
+    if _h(key, dec["captain"]) != old["captain"]:
+        ch.append(f"Captain now: {dec['captain']} (vice {dec['vice']})")
+    elif _h(key, dec["vice"]) != old["vice"]:
+        ch.append(f"Vice-captain now: {dec['vice']}")
+    if _h(key, dec["xi"]) != old["xi"] or _h(key, dec["bench"]) != old["bench"]:
+        ch.append("Line-up changed. Bench now: " + ", ".join(dec["bench"]))
+    for pid, v in dec["status"].items():
+        before = old["status"].get(_h(key, pid))
+        if before and before != _h(key, [v["chance"], v["news"]]):
+            state = "now fit (100%)" if v["chance"] == 100 else f"now {v['chance']}% — {v['news']}"
+            ch.append(f"{v['name']}: {state}")
+    return ch
 
 
 def email_html(summary, report):
@@ -65,11 +115,15 @@ def email_html(summary, report):
 {body}</body></html>"""
 
 
-def send_email_resend(gw, summary, report, dry):
+def default_subject(gw, summary):
+    return f"FPL GW{gw}: " + summary.splitlines()[2].removeprefix("Transfers: ")[:90]
+
+
+def send_email_resend(gw, summary, report, dry, subject=None):
     """Resend API (free tier). Without a verified domain it can only send to the account's own address."""
     key = os.environ["RESEND_API_KEY"].strip()
     to = os.environ.get("MAIL_TO") or os.environ.get("GMAIL_USER")
-    subject = f"FPL GW{gw}: " + summary.splitlines()[2].removeprefix("Transfers: ")[:90]
+    subject = subject or default_subject(gw, summary)
     if dry:
         print(f"[dry-run] Resend email to {to}: {subject}")
         return True
@@ -83,16 +137,16 @@ def send_email_resend(gw, summary, report, dry):
     return False
 
 
-def send_email(gw, summary, report, dry):
+def send_email(gw, summary, report, dry, subject=None):
     if os.environ.get("RESEND_API_KEY"):
-        return send_email_resend(gw, summary, report, dry)
+        return send_email_resend(gw, summary, report, dry, subject)
     user, pw = os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD")
     to = os.environ.get("MAIL_TO") or user
     if not (user and pw) and not dry:
         print("::warning::GMAIL_USER / GMAIL_APP_PASSWORD not set — email skipped")
         return False
     msg = EmailMessage()
-    msg["Subject"] = f"FPL GW{gw}: " + summary.splitlines()[2].removeprefix("Transfers: ")[:90]
+    msg["Subject"] = subject or default_subject(gw, summary)
     msg["From"], msg["To"] = f"FPL Assistant <{user}>", to
     msg.set_content(summary + "\n\n" + report)
     msg.add_alternative(email_html(summary, report), subtype="html")
@@ -136,9 +190,10 @@ def send_whatsapp(summary, dry):
                      params={"phone": phone, "text": summary, "apikey": key}, timeout=60)
     reply = " ".join(re.sub(r"<[^>]+>", " ", r.text).split())
     # CallMeBot echoes the message; cut it out so the report never reaches the public log
+    last_line = summary.strip().splitlines()[-1]
     if "Text to send:" in reply:
         head, tail = reply.split("Text to send:", 1)
-        tail = tail.split("before the deadline.", 1)[-1] if "before the deadline." in tail else ""
+        tail = tail.split(last_line, 1)[-1] if last_line in tail else ""
         reply = head.split("Message to:")[0] + "[message text removed] " + tail
     reply = reply.strip()[:700]
     ok = r.status_code == 200 and "queued" in reply.lower()
@@ -148,32 +203,113 @@ def send_whatsapp(summary, dry):
     return ok
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--force", action="store_true")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--channels", default="email,whatsapp", help="comma-separated: email, whatsapp")
-    args = ap.parse_args()
-    sys.stdout.reconfigure(encoding="utf-8")
-    gw = due(args.force)
-    if gw is None:
-        return
+def build_report(gw):
     # the repo and its Actions logs are public: keep the report (names, transfer plans) out of the log
     run = subprocess.run([sys.executable, str(ROOT / "fpl_report.py")], capture_output=True, text=True,
                          encoding="utf-8")
     if run.returncode:
         sys.exit("fpl_report.py failed:\n" + run.stderr[-3000:])
     print(f"Report built for GW{gw}")
-    report = (ROOT / "reports" / f"GW{gw}.md").read_text(encoding="utf-8")
-    summary = (ROOT / "reports" / f"GW{gw}.summary.txt").read_text(encoding="utf-8").strip()
-    ch = args.channels.split(",")
-    results = [("email" in ch and send_email(gw, summary, report, args.dry_run)),
-               ("whatsapp" in ch and send_whatsapp(summary, args.dry_run))]
-    if not any(results):
-        sys.exit("Nothing was delivered — check the secrets.")
-    if not (args.dry_run or args.force):  # forced test runs don't block the real send
-        SENT.parent.mkdir(exist_ok=True)
-        SENT.write_text("\n".join(map(str, sorted(sent_gws() | {gw}))) + "\n")
+    rep = ROOT / "reports"
+    return ((rep / f"GW{gw}.md").read_text(encoding="utf-8"),
+            (rep / f"GW{gw}.summary.txt").read_text(encoding="utf-8").strip(),
+            json.loads((rep / f"GW{gw}.json").read_text(encoding="utf-8")))
+
+
+def friday_messages(gw, dec, summary, key):
+    """(WhatsApp text, email subject — None when nothing changed)."""
+    fp_file = ROOT / "state" / f"GW{gw}.fingerprint.json"
+    doubtful = [f"{v['name']} {v['chance']}%" for v in dec["status"].values()
+                if v["chance"] != 100 and v["name"] in dec["xi"] + dec["bench"]]
+    if not (key and fp_file.exists()):
+        text = (f"🔄 FPL GW{gw} Friday update (Thursday's plan not available to compare):\n"
+                + "\n".join(summary.splitlines()[2:-1]))
+        return text, f"FPL GW{gw} Friday update"
+    changes = changes_since(dec, json.loads(fp_file.read_text()), key)
+    if not changes:
+        text = (f"✅ FPL GW{gw} Friday check: no changes since Thursday — go with Thursday's plan.\n"
+                f"Deadline: {dec['deadline']}")
+        if doubtful:
+            text += "\nStill doubtful: " + ", ".join(doubtful)
+        return text, None
+    text = (f"🔄 FPL GW{gw} Friday update — changed since Thursday:\n" + "\n".join("• " + c for c in changes)
+            + f"\nCaptain: {dec['captain']} · Vice: {dec['vice']}\nDeadline: {dec['deadline']}\n"
+            "Updated full report in your email.")
+    return text, f"FPL GW{gw} Friday update: " + "; ".join(changes)[:90]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--force", action="store_true", help="send now (test: nothing is marked as sent)")
+    ap.add_argument("--phase", choices=("main", "friday"), default="main", help="with --force")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--channels", default=",".join(CHANNELS), help="comma-separated: email, whatsapp")
+    args = ap.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8")
+    channels = [c for c in args.channels.split(",") if c in CHANNELS]
+
+    boot = api.bootstrap()
+    nxt = next((e for e in boot["events"] if e["is_next"]), None)
+    if not nxt:
+        print("Season over — nothing to send.")
+        return
+    gw = nxt["id"]
+    hours = (datetime.fromisoformat(nxt["deadline_time"].replace("Z", "+00:00"))
+             - datetime.now(timezone.utc)).total_seconds() / 3600
+    main_todo = [c for c in channels if not is_sent(gw, f"main-{c}")]
+    fri_todo = [c for c in channels if not is_sent(gw, f"friday-{c}")]
+    main_done = any(is_sent(gw, f"main-{c}") for c in CHANNELS)
+    print(f"GW{gw} deadline in {hours:.1f} h; to send — main: {main_todo or 'done'}, friday: {fri_todo or 'done'}")
+
+    if args.force:
+        phase, todo = args.phase, channels
+    elif MIN_HOURS_BEFORE <= hours <= FRIDAY_HOURS_BEFORE and main_done and fri_todo:
+        phase, todo = "friday", fri_todo
+    elif MIN_HOURS_BEFORE <= hours <= MAIN_HOURS_BEFORE and main_todo:
+        phase, todo = "main", main_todo  # also retries a channel that failed on an earlier run
+    else:
+        return
+    record = not (args.force or args.dry_run)
+    report, summary, dec = build_report(gw)
+    key = _key()
+    delivered = []
+
+    if phase == "main":
+        fp_file = ROOT / "state" / f"GW{gw}.fingerprint.json"
+        if record and key and not fp_file.exists():
+            fp_file.parent.mkdir(exist_ok=True)
+            fp_file.write_text(json.dumps(fingerprint(dec, key)))
+        if "email" in todo and send_email(gw, summary, report, args.dry_run):
+            delivered.append("email")
+        if "whatsapp" in todo and send_whatsapp(summary, args.dry_run):
+            delivered.append("whatsapp")
+        if record:
+            for c in delivered:
+                mark_sent(gw, f"main-{c}")
+                if hours <= FRIDAY_HOURS_BEFORE:  # sent late: it already has the latest news
+                    mark_sent(gw, f"friday-{c}")
+    else:
+        text, subject = friday_messages(gw, dec, summary, key)
+        if "email" in todo:
+            if subject is None:
+                print("Friday: no changes — no email")
+                delivered.append("email")
+            elif send_email(gw, text, report, args.dry_run, subject=subject):
+                delivered.append("email")
+        if "whatsapp" in todo and send_whatsapp(text, args.dry_run):
+            delivered.append("whatsapp")
+        if record:
+            for c in delivered:
+                mark_sent(gw, f"friday-{c}")
+
+    print(f"{phase}: delivered {delivered or 'nothing'}; still pending "
+          f"{[c for c in todo if c not in delivered] or 'none'}")
+    if not delivered:
+        retry = any(is_sent(gw, f"{phase}-{c}") for c in CHANNELS)
+        if retry:  # another channel already got through: just warn, don't send a GitHub failure email every hour
+            print("::warning::Retry failed — it will try again on the next run.")
+        else:
+            sys.exit("Nothing was delivered this run — it will retry on the next run.")
 
 
 if __name__ == "__main__":

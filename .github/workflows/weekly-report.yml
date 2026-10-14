@@ -3,7 +3,7 @@ name: FPL report before each deadline
 
 on:
   schedule:
-    - cron: "17 */2 * * *"   # every 2 h; notify.py only sends once per GW, ~36 h before the deadline
+    - cron: "17 * * * *"   # hourly (GitHub often delays/skips): notify.py sends Thursday + Friday, retries failures
   workflow_dispatch:
     inputs:
       force:

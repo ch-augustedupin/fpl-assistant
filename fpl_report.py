@@ -281,6 +281,18 @@ def main():
     reports.mkdir(exist_ok=True)
     (reports / f"GW{next_gw}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (reports / f"GW{next_gw}.summary.txt").write_text("\n".join(summary) + "\n", encoding="utf-8")
+    # decisions, for the Friday update to compare with Thursday's (notify.py)
+    watch = set(rec["squad"]) | set(squad)
+    decisions = {
+        "deadline": f"{bogota:%a %d %b %H:%M} Bogotá",
+        "transfers": [[pn(o), pn(i)] for o, i in zip(rec["out"], rec["in"])],
+        "captain": pn(lu["captain"]), "vice": pn(lu["vice"]),
+        "xi": sorted(pn(i) for i in lu["xi"]), "bench": [pn(i) for i in lu["bench"]],
+        "status": {str(i): {"name": pn(i), "chance": overrides.get(i, players[i]["chance_of_playing_next_round"]
+                                                                  if players[i]["status"] != "a" else 100),
+                            "news": players[i]["news"]} for i in watch},
+    }
+    (reports / f"GW{next_gw}.json").write_text(json.dumps(decisions, ensure_ascii=False), encoding="utf-8")
     return next_gw
 
 

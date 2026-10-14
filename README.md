@@ -62,10 +62,21 @@ FPL is still very noisy, so the predictions improve the odds but guarantee nothi
 
 ## Automatic delivery
 
-A GitHub Actions workflow (`.github/workflows/weekly-report.yml`) checks every 2 hours. When the next deadline is
-less than 38 hours away it runs the report once, sends it, and records the gameweek in `state/sent.txt` so it is never
-sent twice. Reports are never committed or printed in the Actions log, because the repo is public: transfer plans
-and league members' names stay in the private email and WhatsApp only.
+A GitHub Actions workflow (`.github/workflows/weekly-report.yml`) checks every hour and sends two messages per
+gameweek:
+
+1. **Main report**, about 36 hours before the deadline (Thursday afternoon/evening Bogotá for Saturday deadlines):
+   the full report by email and the summary by WhatsApp.
+2. **Friday update**, about 12 hours before the deadline, after the managers' press conferences. The report is
+   rebuilt with the latest injury flags and compared with Thursday's. If the transfers, captain, line-up or a squad
+   player's status changed, WhatsApp lists what changed and the email brings the new full report. Otherwise a single
+   WhatsApp line says "no changes".
+
+Each message and channel is sent once (recorded in `state/sent.txt`). A channel that fails — the free WhatsApp relay
+is sometimes down — is retried on every later run until the deadline. Reports are never committed or printed in the
+Actions log, because the repo is public: transfer plans and league members' names stay in the private email and
+WhatsApp only. To compare with Thursday, only a keyed fingerprint of the decisions is stored
+(`state/GW{n}.fingerprint.json`); it can't be read back without the repository secrets.
 
 Repository secrets:
 
@@ -76,7 +87,8 @@ Repository secrets:
 | `WHATSAPP_PHONE`, `CALLMEBOT_APIKEY` | WhatsApp message through [CallMeBot](https://www.callmebot.com) |
 
 To send a report now, go to Actions → "FPL report before each deadline" → **Run workflow** and tick *force*. A
-forced test run does not count as the gameweek's real send.
+forced test run does not count as the gameweek's real send. Locally, `python notify.py --force --phase friday --dry-run`
+prints the Friday update.
 
 ## Running it locally
 
