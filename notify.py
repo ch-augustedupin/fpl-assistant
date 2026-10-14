@@ -135,9 +135,13 @@ def send_whatsapp(summary, dry):
     r = requests.get("https://api.callmebot.com/whatsapp.php",
                      params={"phone": phone, "text": summary, "apikey": key}, timeout=60)
     reply = " ".join(re.sub(r"<[^>]+>", " ", r.text).split())
-    reply = reply.rsplit(". ", 2)[-2:]  # only CallMeBot's status sentence: the echoed text would leak the report
-    reply = ". ".join(reply)[-160:]
-    ok = r.ok and ("queued" in reply.lower() or "sent" in reply.lower())
+    # CallMeBot echoes the message; cut it out so the report never reaches the public log
+    if "Text to send:" in reply:
+        head, tail = reply.split("Text to send:", 1)
+        tail = tail.split("before the deadline.", 1)[-1] if "before the deadline." in tail else ""
+        reply = head.split("Message to:")[0] + "[message text removed] " + tail
+    reply = reply.strip()[:700]
+    ok = r.status_code == 200 and "queued" in reply.lower()
     print(f"CallMeBot HTTP {r.status_code}: {reply}")
     if not ok:
         print("::warning::WhatsApp not confirmed by CallMeBot")
