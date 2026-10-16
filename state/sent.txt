@@ -1,2 +1,3 @@
 6
+7 friday-email
 7 main-email
