@@ -221,6 +221,11 @@ def telegram_chat(base, token):
     if CHAT_FILE.exists():
         return _xor(bytes.fromhex(CHAT_FILE.read_text().strip()), token).decode()
     try:
+        me = requests.get(base + "getMe", timeout=30).json()
+        if not me.get("ok"):
+            print("::warning::Telegram rejected TELEGRAM_BOT_TOKEN — save the current token from @BotFather again")
+            return None
+        print(f"Telegram bot OK: @{me['result']['username']} — looking for your message to it")
         updates = requests.get(base + "getUpdates", timeout=30).json().get("result", [])
     except requests.RequestException:
         return None
