@@ -72,8 +72,9 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
   table for rivalry, so they are only indicative.
 - Only ONE chip per gameweek in FPL. Combo the user asked about: Wildcard now → Bench Boost next week (the WC
   squad's bench is ~15 xPts vs ~9); for GW8 this beat Bench Boost now by ~0.9 league points.
-- Wildcard squad section in the report whenever the advisor rates WC play/consider. `keep` (config.json list or
-  `--keep "Name"`) forces players to stay in every plan; e.g. keeping Rogers in the GW8 WC cost only 1.3 xPts.
+- Wildcard squad section in the report whenever the advisor rates WC play/consider, with one line per change
+  (`wildcard_pairs` + `why_out`: out → in, xPts gain, money, short reason each way). The user does NOT want a keep
+  list in config; `--keep "Name"` exists only for one-off local runs (keeping Rogers in the GW8 WC cost 1.3 xPts).
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
 
 ## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)

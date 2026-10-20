@@ -104,6 +104,38 @@ def h2h_schedule(league, team, gws_window, xp_window, players, league_sq, gw):
     return out
 
 
+def wildcard_pairs(players, squad, new_squad):
+    """Match each sold player with a signing in the same position (most expensive with most expensive)."""
+    pairs = []
+    for pos in (1, 2, 3, 4):
+        outs = sorted((i for i in squad if i not in new_squad and players[i]["element_type"] == pos),
+                      key=lambda i: -players[i]["now_cost"])
+        ins = sorted((i for i in new_squad if i not in squad and players[i]["element_type"] == pos),
+                     key=lambda i: -players[i]["now_cost"])
+        pairs += list(zip(outs, ins))
+    return pairs
+
+
+def why_out(model, players, pid, xp, gws, next_gw):
+    """The main reason the model lets a player go, in a few words."""
+    p, r = players[pid], model.rates[pid]
+    pos = POS[p["element_type"]]
+    total = sum(xp[pid])
+    if p["status"] in ("i", "s", "u") or (p["status"] == "d" and (p["chance_of_playing_next_round"] or 0) < 75):
+        return f"unavailable/doubtful — {p['news'] or p['status']}"
+    if pos == "GKP" and r["p_start"] < 0.2:
+        return "backup keeper who doesn't play — a cheap starting keeper adds bench points"
+    if r["p_start"] < 0.8:
+        return f"rotation risk (starts {r['p_start']:.0%} lately), only {total:.1f} xPts"
+    e = model.ease(p["team"], gws, pos)
+    if e < 0.92:
+        return f"hard fixtures ({model.fixture_text(p['team'], gws)}), {total:.1f} xPts"
+    if r["trend"] == "↓":
+        return f"form ↓ (last3 {'/'.join(map(str, r['pts_last3']))}), {total:.1f} xPts"
+    per_m = total / (p["now_cost"] / 10)
+    return f"low return for the price: {total:.1f} xPts for {m(p['now_cost'])} ({per_m:.1f} per £m)"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--team", type=int, default=CONFIG["team_id"])
@@ -113,7 +145,7 @@ def main():
     ap.add_argument("--ft", type=int, help="override the computed number of free transfers")
     ap.add_argument("--override", help='availability overrides, e.g. "Saka=50,Rice=0" (percent)')
     ap.add_argument("--exclude", help="comma-separated players never to buy")
-    ap.add_argument("--keep", help="comma-separated players never to sell (adds to config.json \"keep\")")
+    ap.add_argument("--keep", help="comma-separated players never to sell (one-off local runs)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -128,7 +160,7 @@ def main():
     hist = api.player_histories(boot, gw)
     overrides = parse_overrides(args.override, players)
     banned = set(parse_overrides(",".join(f"{n}=0" for n in (args.exclude or "").split(",") if n), players))
-    keep_names = [n for n in (args.keep or "").split(",") if n] + CONFIG.get("keep", [])
+    keep_names = [n for n in (args.keep or "").split(",") if n]
     keep = set(parse_overrides(",".join(f"{n}=0" for n in keep_names), players))
     model = Model(boot, fixtures, hist, cutoff=gw, overrides=overrides, europe_teams=CONFIG["europe_teams"])
     xp = model.predict(gws)
@@ -304,10 +336,14 @@ def main():
                 flags = model.flags(pid, next_gw)
                 out(f"  {tag} {role} {name(pid):34} {xp1[pid]:4.1f} / {sum(xp[pid]):5.1f}  {model.reason(pid, gws)}"
                     + (f"  [{'; '.join(flags)}]" if flags else ""))
-        out("Sell: " + ", ".join(f"{players[i]['web_name']} ({m(sell[i])})" for i in squad if i not in wc["squad"]))
-        if keep:
-            out("Kept on request: " + ", ".join(players[i]["web_name"] for i in keep if i in squad))
-        out("To keep a player you like, add him to \"keep\" in config.json (or run with --keep \"Name\").")
+        out(f"Why each change (xPts = predicted points over the next {len(gws)} GWs):")
+        for o, i in wildcard_pairs(players, squad, wc["squad"]):
+            diff = sum(xp[i]) - sum(xp[o])
+            money = players[i]["now_cost"] - sell[o]
+            cash = f"costs {m(money)} more" if money > 0 else f"frees {m(-money)}" if money < 0 else "same price"
+            out(f"- **{players[o]['web_name']} → {players[i]['web_name']}** ({POS[players[o]['element_type']]}, "
+                f"{diff:+.1f} xPts, {cash}). Out: {why_out(model, players, o, xp, gws, next_gw)}. "
+                f"In: {model.reason(i, gws)}.")
         out()
     out("xPts = expected points from form (recent GWs weigh most), minutes/rotation, injury flags and fixtures. "
         "Check late press-conference news before the deadline.")
