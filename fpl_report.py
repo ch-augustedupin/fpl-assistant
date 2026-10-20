@@ -77,6 +77,33 @@ def chips_available(boot, history, gw):
     return avail
 
 
+RIVAL_GAP = 3  # league points: an opponent this close is a direct rival (the match counts up to 1.5×, less far ahead)
+
+
+def h2h_schedule(league, team, gws_window, xp_window, players, league_sq, gw):
+    """Per GW of the chip window: who I play, their predicted score and how much the match counts.
+
+    Later weeks blend the model (their current squad) with their season average, since they will change it."""
+    table = {r["entry"]: r for r in api.h2h_standings(league)["standings"]["results"]}
+    me = table.get(team)
+    out = []
+    for k, g in enumerate(gws_window):
+        opp = h2h.opponent(league, g, team)
+        if not opp or opp[0] not in league_sq or not me:
+            out.append(None)
+            continue
+        sq = league_sq[opp[0]]
+        model_xp = lineup(players, {i: xp_window[i][k] for i in sq}, sq)["xp"]
+        r = table.get(opp[0], {})
+        played = r.get("matches_won", 0) + r.get("matches_drawn", 0) + r.get("matches_lost", 0)
+        avg = r.get("points_for", 0) / played if played else model_xp
+        opp_xp = model_xp if k == 0 else 0.6 * model_xp + 0.4 * avg
+        rival = r and abs(r["total"] - me["total"]) <= RIVAL_GAP
+        # today's table says less about who is a rival the further ahead the match is
+        out.append({"name": opp[1], "opp_xp": opp_xp, "weight": 1 + 0.5 * max(0.0, 1 - 0.1 * k) if rival else 1.0})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--team", type=int, default=CONFIG["team_id"])
@@ -251,9 +278,10 @@ def main():
         xp_window = model.predict(gws_window) if gws_window != gws else xp
         sell_rec = {i: sell.get(i, players[i]["now_cost"]) for i in rec["squad"]}
         wc_gain = (wc["objective"] - plans[best_k]["objective"]) if wc else None
+        h2h_window = h2h_schedule(args.league, args.team, gws_window, xp_window, players, league_sq, gw)
         chip_advice = chips.advise(model, players, rec["squad"], sell_rec, rec["bank_after"], ft, xp_window,
-                                   gws_window, windows, lu["xp"] + 0.1 * sum(xp1[i] for i in lu["bench"]),
-                                   (prev["my_xp"] - prev["opp"]["xp"]) if prev else None, wc_gain)
+                                   gws_window, windows, lu["xp"],
+                                   (prev["my_xp"] - prev["opp"]["xp"]) if prev else None, wc_gain, h2h_window)
     icon = {"play": "✅ PLAY THIS WEEK", "consider": "🤔 worth considering", "save": "⏳ save"}
     for a in chip_advice:
         out(f"- **{a['chip']}**: {icon[a['verdict']]} — {a['reason']}")

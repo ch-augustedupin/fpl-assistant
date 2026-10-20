@@ -17,7 +17,7 @@ It uses only the public Fantasy Premier League API (no login) and never changes 
 | Transfer options | Best plan with 0, 1 and 2 transfers: who to sell and buy, the points gained, the bank left, and the reasons |
 | Line-up | Starting XI, captain, vice-captain and bench order for the next gameweek |
 | H2H preview | This week's opponent, predicted score, rough win chance, shared players and each side's differentials |
-| Chips | For each chip you still have: ✅ play this week / 🤔 worth considering / ⏳ save. Triple Captain and Bench Boost are compared with every later gameweek of the chip's window (GW1–19 or GW20–38); Free Hit and Wildcard by how much a rebuilt team would add. Shows the H2H win chance with and without the chip, and which chips your opponent still has |
+| Chips | For each chip you still have: ✅ play this week / 🤔 worth considering / ⏳ save. Triple Captain and Bench Boost are compared with every later gameweek of the chip's window (GW1–19 or GW20–38); Free Hit and Wildcard by how much a rebuilt team would add. Because the goal is winning the H2H league, chips are judged by the **league points** they add: for every week it looks at who you play, how close the match is predicted to be, and whether the opponent is a direct rival in the table (a chip matters most in a close match against a rival). Also shows which chips your opponent still has |
 
 Example WhatsApp message (made-up data):
 

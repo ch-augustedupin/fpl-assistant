@@ -63,7 +63,13 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
   takes part if its secret exists (`configured()`), so an unconfigured one doesn't retry forever.
 - Chips: `fpl/chips.py` → report section + summary line ("🎯 Chip: PLAY …" / "Chip to consider"). TC/BB compare this
   week with every later GW of the chip window (same squad); FH = one-week team gain (≥12), WC = horizon gain (≥15).
-  Chips to play are part of the Friday comparison (`chips` in the fingerprint). Replay of GW7 → "play TC on Haaland".
+  Chips to play are part of the Friday comparison (`chips` in the fingerprint).
+- Chips are judged in LEAGUE POINTS (user's request: the goal is winning the H2H league): `h2h_schedule()` gets the
+  opponent of every GW in the chip window (pairings are published to GW34), their predicted score (model on their
+  current squad, blended 60/40 with their season average for later weeks), and a weight: 1.5× vs a direct rival
+  (within `RIVAL_GAP`=3 league points), fading 0.1 per week ahead. Gain = 3 × weight × Δ win chance; later weeks are
+  discounted 2.5%/week (max 25%) so the best of many noisy future weeks doesn't always win. Replays use today's
+  table for rivalry, so they are only indicative.
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
 
 ## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)
