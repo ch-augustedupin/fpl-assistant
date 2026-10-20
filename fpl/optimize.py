@@ -26,11 +26,13 @@ def solver():
     return pulp.HiGHS(msg=False) if "HiGHS" in pulp.listSolvers(onlyAvailable=True) else pulp.PULP_CBC_CMD(msg=False)
 
 
-def optimise(players, xp, squad, sell, bank, free_transfers, n_transfers, decay=0.85, pool_size=40, banned=()):
+def optimise(players, xp, squad, sell, bank, free_transfers, n_transfers, decay=0.85, pool_size=40, banned=(),
+             keep=()):
     """
     players: {pid: bootstrap element}; xp: {pid: [xPts per GW]}; squad: current 15 pids;
     sell: {pid: selling price (tenths)} for the squad; bank in tenths.
     Exactly `n_transfers` transfers (0 = keep the squad; None = wildcard, unlimited and free).
+    keep: current squad players that must stay.
     Returns a plan dict or None if infeasible.
     """
     wildcard = n_transfers is None
@@ -61,6 +63,9 @@ def optimise(players, xp, squad, sell, bank, free_transfers, n_transfers, decay=
         prob += pulp.lpSum(x[i] for i in pool if players[i]["team"] == team) <= 3
     if not wildcard:
         prob += pulp.lpSum(x[i] for i in cur) == 15 - n_transfers
+    for i in keep:  # players the user wants to keep (never sold)
+        if i in cur:
+            prob += x[i] == 1
     buy = pulp.lpSum(players[i]["now_cost"] * x[i] for i in pool if i not in cur)
     sold = pulp.lpSum(sell[i] * (1 - x[i]) for i in cur)
     prob += buy - sold <= bank

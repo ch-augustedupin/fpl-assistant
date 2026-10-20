@@ -113,6 +113,7 @@ def main():
     ap.add_argument("--ft", type=int, help="override the computed number of free transfers")
     ap.add_argument("--override", help='availability overrides, e.g. "Saka=50,Rice=0" (percent)')
     ap.add_argument("--exclude", help="comma-separated players never to buy")
+    ap.add_argument("--keep", help="comma-separated players never to sell (adds to config.json \"keep\")")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -127,6 +128,8 @@ def main():
     hist = api.player_histories(boot, gw)
     overrides = parse_overrides(args.override, players)
     banned = set(parse_overrides(",".join(f"{n}=0" for n in (args.exclude or "").split(",") if n), players))
+    keep_names = [n for n in (args.keep or "").split(",") if n] + CONFIG.get("keep", [])
+    keep = set(parse_overrides(",".join(f"{n}=0" for n in keep_names), players))
     model = Model(boot, fixtures, hist, cutoff=gw, overrides=overrides, europe_teams=CONFIG["europe_teams"])
     xp = model.predict(gws)
     xp1 = {pid: v[0] for pid, v in xp.items()}
@@ -172,12 +175,12 @@ def main():
     # ---- transfer plans
     plans = {}
     for k in range(0, args.max_transfers + 1):
-        plan = optimise(players, xp, squad, sell, bank, ft, k, banned=banned)
+        plan = optimise(players, xp, squad, sell, bank, ft, k, banned=banned, keep=keep)
         if plan:
             next_ft = min(5, max(ft - k, 0) + 1)
             plan["score"] = plan["objective"] + FT_BANK_VALUE * (next_ft - 1) - HIT_MARGIN * plan["hits"] / 4
             plans[k] = plan
-    wc = optimise(players, xp, squad, sell, bank, ft, None, banned=banned)
+    wc = optimise(players, xp, squad, sell, bank, ft, None, banned=banned, keep=keep)
     base = plans[0]["objective"]
     best_k = max(plans, key=lambda k: plans[k]["score"])
     out("## Transfer options (gain = weighted xPts over the horizon vs. no transfer, after hits)")
@@ -286,6 +289,26 @@ def main():
     for a in chip_advice:
         out(f"- **{a['chip']}**: {icon[a['verdict']]} — {a['reason']}")
     out()
+
+    # ---- the Wildcard squad itself, when the advisor thinks it is worth it
+    wc_advice = next((a for a in chip_advice if a["chip"] == "Wildcard" and a["verdict"] != "save"), None)
+    if wc and wc_advice:
+        wlu = lineup(players, xp1, wc["squad"])
+        out(f"## Wildcard squad (if you play it this week)  —  GW{next_gw} predicted {wlu['xp']:.1f} pts "
+            f"vs {lu['xp']:.1f} without it  ·  bank after {m(wc['bank_after'])}")
+        out(f"Captain: {name(wlu['captain'])} {xp1[wlu['captain']]:.1f}  ·  Vice: {name(wlu['vice'])}")
+        for pos in (1, 2, 3, 4):
+            for pid in sorted([i for i in wc["squad"] if players[i]["element_type"] == pos], key=lambda i: -sum(xp[i])):
+                tag = "kept" if pid in squad else "NEW "
+                role = "bench" if pid in wlu["bench"] else "XI   "
+                flags = model.flags(pid, next_gw)
+                out(f"  {tag} {role} {name(pid):34} {xp1[pid]:4.1f} / {sum(xp[pid]):5.1f}  {model.reason(pid, gws)}"
+                    + (f"  [{'; '.join(flags)}]" if flags else ""))
+        out("Sell: " + ", ".join(f"{players[i]['web_name']} ({m(sell[i])})" for i in squad if i not in wc["squad"]))
+        if keep:
+            out("Kept on request: " + ", ".join(players[i]["web_name"] for i in keep if i in squad))
+        out("To keep a player you like, add him to \"keep\" in config.json (or run with --keep \"Name\").")
+        out()
     out("xPts = expected points from form (recent GWs weigh most), minutes/rotation, injury flags and fixtures. "
         "Check late press-conference news before the deadline.")
 

@@ -70,6 +70,10 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
   (within `RIVAL_GAP`=3 league points), fading 0.1 per week ahead. Gain = 3 × weight × Δ win chance; later weeks are
   discounted 2.5%/week (max 25%) so the best of many noisy future weeks doesn't always win. Replays use today's
   table for rivalry, so they are only indicative.
+- Only ONE chip per gameweek in FPL. Combo the user asked about: Wildcard now → Bench Boost next week (the WC
+  squad's bench is ~15 xPts vs ~9); for GW8 this beat Bench Boost now by ~0.9 league points.
+- Wildcard squad section in the report whenever the advisor rates WC play/consider. `keep` (config.json list or
+  `--keep "Name"`) forces players to stay in every plan; e.g. keeping Rogers in the GW8 WC cost only 1.3 xPts.
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
 
 ## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)

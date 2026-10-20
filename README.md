@@ -17,6 +17,7 @@ It uses only the public Fantasy Premier League API (no login) and never changes 
 | Transfer options | Best plan with 0, 1 and 2 transfers: who to sell and buy, the points gained, the bank left, and the reasons |
 | Line-up | Starting XI, captain, vice-captain and bench order for the next gameweek |
 | H2H preview | This week's opponent, predicted score, rough win chance, shared players and each side's differentials |
+| Wildcard squad | When the Wildcard is worth considering: the full 15 it would build (new/kept, XI/bench, captain, who to sell). Players listed under `keep` in `config.json` are never sold |
 | Chips | For each chip you still have: ✅ play this week / 🤔 worth considering / ⏳ save. Triple Captain and Bench Boost are compared with every later gameweek of the chip's window (GW1–19 or GW20–38); Free Hit and Wildcard by how much a rebuilt team would add. Because the goal is winning the H2H league, chips are judged by the **league points** they add: for every week it looks at who you play, how close the match is predicted to be, and whether the opponent is a direct rival in the table (a chip matters most in a close match against a rival). Also shows which chips your opponent still has |
 
 Example WhatsApp message (made-up data):
@@ -97,7 +98,7 @@ prints the Friday update.
 pip install -r requirements.txt
 python fpl_report.py                              # report for the next deadline (saved in reports/, git-ignored)
 python fpl_report.py --override "Saka=50,Rice=0"  # late injury news from press conferences (% chance of playing)
-python fpl_report.py --exclude "Haaland" --max-transfers 3 --horizon 6
+python fpl_report.py --exclude "Haaland" --keep "Rogers" --max-transfers 3 --horizon 6
 python notify.py --force --dry-run                # build the messages without sending
 python backtest.py --gws 3 4 5                    # check the model against past gameweeks
 ```
