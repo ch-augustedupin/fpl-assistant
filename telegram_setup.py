@@ -1,12 +1,14 @@
 """One-time Telegram setup: finds your chat with the bot and saves both secrets in GitHub.
 
-1. In Telegram, open @BotFather, send /newbot, pick a name; copy the token it gives you.
+1. In Telegram, open @BotFather, send /newbot, pick a name; COPY the token it gives you.
 2. Open your new bot in Telegram and send it any message (e.g. "hi").
-3. Run:  python telegram_setup.py   and paste the token when asked (it is hidden, never printed).
+3. Run:  python telegram_setup.py   — it reads the token from your clipboard (never printed).
+   If the clipboard doesn't hold a token, it asks for it instead (hidden input).
 
 Needs the GitHub CLI (gh) logged in. The token goes straight from here into the repo secrets.
 """
 import getpass
+import re
 import subprocess
 import sys
 
@@ -15,9 +17,33 @@ import requests
 REPO = "ch-augustedupin/fpl-assistant"
 
 
+TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,50}$")
+
+
+def clipboard():
+    """Clipboard text on Windows (PowerShell) or via tkinter elsewhere; '' if unavailable."""
+    try:
+        if sys.platform == "win32":
+            return subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                                  capture_output=True, text=True, timeout=15).stdout.strip()
+        import tkinter
+        root = tkinter.Tk()
+        root.withdraw()
+        text = root.clipboard_get()
+        root.destroy()
+        return text.strip()
+    except Exception:
+        return ""
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    token = getpass.getpass("Bot token from @BotFather (hidden): ").strip()
+    token = clipboard()
+    if TOKEN_RE.match(token):
+        print("Token read from your clipboard.")
+    else:
+        print("No bot token in the clipboard (copy it from @BotFather and run this again),")
+        token = getpass.getpass("or type it here (hidden): ").strip()
     base = f"https://api.telegram.org/bot{token}/"
     me = requests.get(base + "getMe", timeout=30).json()
     if not me.get("ok"):
