@@ -12,7 +12,8 @@ CallMeBot down) is retried on every later run until the deadline.
     python notify.py --force [--phase friday] # test now (doesn't mark anything as sent)
     python notify.py --dry-run                # build everything, print instead of sending
 
-Environment (GitHub secrets): GMAIL_USER, GMAIL_APP_PASSWORD, [MAIL_TO], WHATSAPP_PHONE, CALLMEBOT_APIKEY.
+Environment (GitHub secrets): RESEND_API_KEY (or GMAIL_APP_PASSWORD), GMAIL_USER, [MAIL_TO], WHATSAPP_PHONE,
+CALLMEBOT_APIKEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 A channel whose secrets are missing is skipped with a warning.
 """
 import argparse
@@ -38,7 +39,7 @@ SENT = ROOT / "state" / "sent.txt"
 MAIN_HOURS_BEFORE = 38    # Sat 10:00 UTC deadline -> from Thu 20:00 UTC (15:00 Bogotá)
 FRIDAY_HOURS_BEFORE = 12  # Sat 10:00 UTC deadline -> from Fri 22:00 UTC (17:00 Bogotá)
 MIN_HOURS_BEFORE = 1
-CHANNELS = ("email", "whatsapp")
+CHANNELS = ("email", "whatsapp", "telegram")
 
 
 # ---------- what has been sent: state/sent.txt lines "<gw> <phase>-<channel>" (a bare "<gw>" = all) ----------
@@ -74,6 +75,7 @@ def _h(key, value):
 
 def fingerprint(dec, key):
     return {"transfers": _h(key, dec["transfers"]), "captain": _h(key, dec["captain"]), "vice": _h(key, dec["vice"]),
+            "chips": _h(key, dec.get("chips", [])),
             "xi": _h(key, dec["xi"]), "bench": _h(key, dec["bench"]),
             "status": {_h(key, pid): _h(key, [v["chance"], v["news"]]) for pid, v in dec["status"].items()}}
 
@@ -88,6 +90,8 @@ def changes_since(dec, old, key):
         ch.append(f"Captain now: {dec['captain']} (vice {dec['vice']})")
     elif _h(key, dec["vice"]) != old["vice"]:
         ch.append(f"Vice-captain now: {dec['vice']}")
+    if "chips" in old and _h(key, dec.get("chips", [])) != old["chips"]:
+        ch.append("Chip now: " + (", ".join(dec.get("chips", [])) or "none — keep your chips"))
     if _h(key, dec["xi"]) != old["xi"] or _h(key, dec["bench"]) != old["bench"]:
         ch.append("Line-up changed. Bench now: " + ", ".join(dec["bench"]))
     for pid, v in dec["status"].items():
@@ -203,6 +207,38 @@ def send_whatsapp(summary, dry):
     return ok
 
 
+def send_telegram(text, report, gw, dry):
+    """Telegram bot: the summary as a message, the full report attached as a file (private chat)."""
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if dry:
+        print("[dry-run] Telegram:\n" + text)
+        return True
+    if not (token and chat):
+        print("::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — Telegram skipped")
+        return False
+    base = f"https://api.telegram.org/bot{token.strip()}/"
+    try:
+        r = requests.post(base + "sendMessage", timeout=30, json={"chat_id": chat.strip(), "text": text})
+        ok = r.ok and r.json().get("ok")
+        if ok and report:
+            requests.post(base + "sendDocument", timeout=60, data={"chat_id": chat.strip()},
+                          files={"document": (f"FPL_GW{gw}.md", report.encode("utf-8"), "text/markdown")})
+    except requests.RequestException as e:  # never print the URL: it contains the token
+        print(f"::warning::Telegram request failed: {type(e).__name__}")
+        return False
+    if ok:
+        print("Telegram sent")
+    else:
+        print(f"::warning::Telegram answered HTTP {r.status_code}: {r.json().get('description', '')[:200]}")
+    return bool(ok)
+
+
+def configured(channel):
+    need = {"email": ("RESEND_API_KEY", "GMAIL_APP_PASSWORD"), "whatsapp": ("CALLMEBOT_APIKEY",),
+            "telegram": ("TELEGRAM_BOT_TOKEN",)}[channel]
+    return any(os.environ.get(k) for k in need)
+
+
 def build_report(gw):
     # the repo and its Actions logs are public: keep the report (names, transfer plans) out of the log
     run = subprocess.run([sys.executable, str(ROOT / "fpl_report.py")], capture_output=True, text=True,
@@ -246,7 +282,7 @@ def main():
     ap.add_argument("--channels", default=",".join(CHANNELS), help="comma-separated: email, whatsapp")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
-    channels = [c for c in args.channels.split(",") if c in CHANNELS]
+    channels = [c for c in args.channels.split(",") if c in CHANNELS and (args.dry_run or configured(c))]
 
     boot = api.bootstrap()
     nxt = next((e for e in boot["events"] if e["is_next"]), None)
@@ -283,6 +319,8 @@ def main():
             delivered.append("email")
         if "whatsapp" in todo and send_whatsapp(summary, args.dry_run):
             delivered.append("whatsapp")
+        if "telegram" in todo and send_telegram(summary, report, gw, args.dry_run):
+            delivered.append("telegram")
         if record:
             for c in delivered:
                 mark_sent(gw, f"main-{c}")
@@ -298,6 +336,8 @@ def main():
                 delivered.append("email")
         if "whatsapp" in todo and send_whatsapp(text, args.dry_run):
             delivered.append("whatsapp")
+        if "telegram" in todo and send_telegram(text, report if subject else None, gw, args.dry_run):
+            delivered.append("telegram")
         if record:
             for c in delivered:
                 mark_sent(gw, f"friday-{c}")

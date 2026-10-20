@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fpl import api, h2h
+from fpl import api, chips, h2h
 from fpl.model import POS, Model, norm
 from fpl.optimize import lineup, optimise, selling_price
 
@@ -219,6 +219,10 @@ def main():
             + (", ".join(players[i]["web_name"] for i in prev["shared"]) or "none"))
         out("Your differentials: " + ", ".join(f"{players[i]['web_name']} {xp1[i]:.1f}" for i in prev["my_diff"]))
         out("Their differentials: " + ", ".join(f"{players[i]['web_name']} {xp1[i]:.1f}" for i in prev["their_diff"]))
+        opp_chips, opp_notes = chips.opponent_threat(boot, api.entry_history(opp_id), next_gw, o["xi"],
+                                                     o["captain"], xp1, players)
+        out("Their chips left: " + (", ".join(opp_chips) or "none")
+            + (f"  ·  ⚠ {'; '.join(opp_notes)}" if opp_notes else ""))
         if lu["captain"] in o["xi"]:
             note = "they also start him" + (" and will probably captain him too" if o["captain"] == lu["captain"] else "")
             out(f"Captain note: {players[lu['captain']]['web_name']} — {note}; the gain only counts if they don't captain him.")
@@ -229,10 +233,10 @@ def main():
                         f"({xp1[alts[0]]:.1f}) adds upside.")
         out()
 
-    # ---- chips
-    avail = chips_available(boot, ehist, next_gw)
+    # ---- chips: is this week a good moment, compared with the rest of each chip's window?
+    windows = chips.windows(boot, ehist, next_gw)
     out("## Chips")
-    out("Available: " + (", ".join(avail) or "none"))
+    out("Available: " + (", ".join(f"{c} (until GW{s})" for c, s in windows.items()) or "none"))
     for g in gws:
         tf = model.team_fixtures(g)
         dbl = [short[t] for t, f in tf.items() if len(f) > 1]
@@ -241,15 +245,18 @@ def main():
             out(f"GW{g} double gameweek: {', '.join(dbl)}")
         if blank:
             out(f"GW{g} blank: {', '.join(blank)}")
-    bench_xp = sum(xp1[i] for i in lu["bench"])
-    if "Bench Boost" in avail and bench_xp >= 12:
-        out(f"Bench Boost worth considering this week: bench predicted {bench_xp:.1f} pts.")
-    if "Triple Captain" in avail and xp1[lu["captain"]] >= 11:
-        out(f"Triple Captain worth considering: {players[lu['captain']]['web_name']} {xp1[lu['captain']]:.1f} xPts.")
-    if wc and "Wildcard" in avail:
-        gain = wc["objective"] - plans[best_k]["objective"]
-        out(f"Wildcard squad would add {gain:+.1f} weighted xPts over the horizon "
-            + ("— worth considering." if gain >= 15 else "— not needed now."))
+    chip_advice = []
+    if windows:
+        gws_window = list(range(next_gw, max(windows.values()) + 1))
+        xp_window = model.predict(gws_window) if gws_window != gws else xp
+        sell_rec = {i: sell.get(i, players[i]["now_cost"]) for i in rec["squad"]}
+        wc_gain = (wc["objective"] - plans[best_k]["objective"]) if wc else None
+        chip_advice = chips.advise(model, players, rec["squad"], sell_rec, rec["bank_after"], ft, xp_window,
+                                   gws_window, windows, lu["xp"] + 0.1 * sum(xp1[i] for i in lu["bench"]),
+                                   (prev["my_xp"] - prev["opp"]["xp"]) if prev else None, wc_gain)
+    icon = {"play": "✅ PLAY THIS WEEK", "consider": "🤔 worth considering", "save": "⏳ save"}
+    for a in chip_advice:
+        out(f"- **{a['chip']}**: {icon[a['verdict']]} — {a['reason']}")
     out()
     out("xPts = expected points from form (recent GWs weigh most), minutes/rotation, injury flags and fixtures. "
         "Check late press-conference news before the deadline.")
@@ -273,8 +280,14 @@ def main():
             if players[i]["status"] in ("d", "i", "s") or i in overrides]
     if warn:
         summary.append("⚠ Doubtful: " + ", ".join(warn))
-    if wc and "Wildcard" in avail and wc["objective"] - plans[best_k]["objective"] >= 15:
-        summary.append(f"Chip idea: Wildcard (+{wc['objective'] - plans[best_k]['objective']:.0f} xPts)")
+    play = [a for a in chip_advice if a["verdict"] == "play"]
+    consider = [a for a in chip_advice if a["verdict"] == "consider"]
+    if play:
+        summary.append("🎯 Chip: PLAY " + "; ".join(a["short"] for a in play) + " — good week for it")
+    if consider:
+        summary.append("Chip to consider: " + "; ".join(a["short"] for a in consider))
+    if opp and opp_notes:
+        summary.append(f"⚠ {opp_name} could play: " + opp_notes[0])
     summary.append("Full report in your email. Check press conferences before the deadline.")
 
     reports = ROOT / "reports"
@@ -287,6 +300,7 @@ def main():
         "deadline": f"{bogota:%a %d %b %H:%M} Bogotá",
         "transfers": [[pn(o), pn(i)] for o, i in zip(rec["out"], rec["in"])],
         "captain": pn(lu["captain"]), "vice": pn(lu["vice"]),
+        "chips": sorted(a["chip"] for a in play),
         "xi": sorted(pn(i) for i in lu["xi"]), "bench": [pn(i) for i in lu["bench"]],
         "status": {str(i): {"name": pn(i), "chance": overrides.get(i, players[i]["chance_of_playing_next_round"]
                                                                   if players[i]["status"] != "a" else 100),

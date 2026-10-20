@@ -4,7 +4,7 @@ Weekly Fantasy Premier League advice for my team, **Vodka Juniors**, in our priv
 "Fantasy PL 26/27". About 36 hours before every deadline it works out the best transfers, captain, starting XI and
 bench, previews this week's H2H opponent, and sends the result to me:
 
-- **WhatsApp**: a short summary
+- **WhatsApp** and **Telegram**: a short summary (Telegram also attaches the full report)
 - **Email**: the full report
 
 It uses only the public Fantasy Premier League API (no login) and never changes the team. I make the transfers myself.
@@ -17,7 +17,7 @@ It uses only the public Fantasy Premier League API (no login) and never changes 
 | Transfer options | Best plan with 0, 1 and 2 transfers: who to sell and buy, the points gained, the bank left, and the reasons |
 | Line-up | Starting XI, captain, vice-captain and bench order for the next gameweek |
 | H2H preview | This week's opponent, predicted score, rough win chance, shared players and each side's differentials |
-| Chips | Which chips are still available, double/blank gameweeks, and when a Wildcard, Bench Boost or Triple Captain looks worth it |
+| Chips | For each chip you still have: ✅ play this week / 🤔 worth considering / ⏳ save. Triple Captain and Bench Boost are compared with every later gameweek of the chip's window (GW1–19 or GW20–38); Free Hit and Wildcard by how much a rebuilt team would add. Shows the H2H win chance with and without the chip, and which chips your opponent still has |
 
 Example WhatsApp message (made-up data):
 
@@ -85,6 +85,7 @@ Repository secrets:
 | `RESEND_API_KEY` | Sends the email through [Resend](https://resend.com) (free plan) |
 | `GMAIL_USER` | The address that receives the email (`MAIL_TO` can override it) |
 | `WHATSAPP_PHONE`, `CALLMEBOT_APIKEY` | WhatsApp message through [CallMeBot](https://www.callmebot.com) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram message from your own bot — set both with `python telegram_setup.py` |
 
 To send a report now, go to Actions → "FPL report before each deadline" → **Run workflow** and tick *force*. A
 forced test run does not count as the gameweek's real send. Locally, `python notify.py --force --phase friday --dry-run`
@@ -113,6 +114,8 @@ The first run downloads every player's history (about 2–3 minutes). It is cach
 | `fpl/model.py` | Expected-points model: form, condition, minutes, fixtures |
 | `fpl/optimize.py` | Transfer and line-up optimiser (PuLP) |
 | `fpl/h2h.py` | Head-to-head opponent preview and league ownership |
+| `fpl/chips.py` | Chip advisor: is this a good week for each remaining chip |
+| `telegram_setup.py` | One-time Telegram setup (saves the bot secrets in GitHub) |
 | `backtest.py` | Tests the model against finished gameweeks |
 | `config.json` | Team ID, league ID and the clubs playing in Europe this season |
 

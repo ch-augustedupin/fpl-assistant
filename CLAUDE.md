@@ -58,6 +58,12 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
   refused SMTP logins from GitHub runners with the correct app password), else Gmail SMTP with an app password (secrets `GMAIL_USER`, `GMAIL_APP_PASSWORD`, optional `MAIL_TO`).
   Full report as HTML with the summary box on top. WhatsApp: CallMeBot (`WHATSAPP_PHONE` with country code,
   `CALLMEBOT_APIKEY`), summary only (`reports/GW{n}.summary.txt`, ~400 chars).
+- Telegram: `send_telegram` (summary message + full report as a .md document), secrets TELEGRAM_BOT_TOKEN /
+  TELEGRAM_CHAT_ID set by `telegram_setup.py` (token via getpass → `gh secret set`, never printed). A channel only
+  takes part if its secret exists (`configured()`), so an unconfigured one doesn't retry forever.
+- Chips: `fpl/chips.py` → report section + summary line ("🎯 Chip: PLAY …" / "Chip to consider"). TC/BB compare this
+  week with every later GW of the chip window (same squad); FH = one-week team gain (≥12), WC = horizon gain (≥15).
+  Chips to play are part of the Friday comparison (`chips` in the fingerprint). Replay of GW7 → "play TC on Haaland".
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
 
 ## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)

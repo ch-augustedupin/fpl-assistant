@@ -12,7 +12,7 @@ on:
         default: false
       channels:
         description: "Channels to send (test one at a time)"
-        default: "email,whatsapp"
+        default: "email,whatsapp,telegram"
       phase:
         description: "With force: which message to test"
         type: choice
@@ -45,7 +45,9 @@ jobs:
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: python notify.py ${{ inputs.force && '--force' || '' }} --phase "${{ inputs.phase || 'main' }}" --channels "${{ inputs.channels || 'email,whatsapp' }}"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify.py ${{ inputs.force && '--force' || '' }} --phase "${{ inputs.phase || 'main' }}" --channels "${{ inputs.channels || 'email,whatsapp,telegram' }}"
       - name: Commit the sent marker (reports are never committed)
         run: |
           git config user.name "github-actions[bot]"
