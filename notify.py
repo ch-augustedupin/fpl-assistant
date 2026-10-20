@@ -207,16 +207,48 @@ def send_whatsapp(summary, dry):
     return ok
 
 
+CHAT_FILE = ROOT / "state" / "telegram_chat.enc"
+
+
+def _xor(data, token):
+    stream = hashlib.sha256(("fpl-telegram-chat:" + token).encode()).digest()
+    return bytes(b ^ stream[i % len(stream)] for i, b in enumerate(data))
+
+
+def telegram_chat(base, token):
+    """Chat id without a TELEGRAM_CHAT_ID secret: taken from the first private message sent to the bot,
+    then kept in state/ encrypted with the bot token (the repo is public)."""
+    if CHAT_FILE.exists():
+        return _xor(bytes.fromhex(CHAT_FILE.read_text().strip()), token).decode()
+    try:
+        updates = requests.get(base + "getUpdates", timeout=30).json().get("result", [])
+    except requests.RequestException:
+        return None
+    for u in reversed(updates):
+        msg = u.get("message") or u.get("edited_message") or {}
+        if msg.get("chat", {}).get("type") == "private":
+            chat = str(msg["chat"]["id"])
+            CHAT_FILE.parent.mkdir(exist_ok=True)
+            CHAT_FILE.write_text(_xor(chat.encode(), token).hex())
+            print("Telegram chat found and saved (encrypted)")
+            return chat
+    return None
+
+
 def send_telegram(text, report, gw, dry):
     """Telegram bot: the summary as a message, the full report attached as a file (private chat)."""
     token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if dry:
         print("[dry-run] Telegram:\n" + text)
         return True
-    if not (token and chat):
-        print("::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — Telegram skipped")
+    if not token:
+        print("::warning::TELEGRAM_BOT_TOKEN not set — Telegram skipped")
         return False
     base = f"https://api.telegram.org/bot{token.strip()}/"
+    chat = chat or telegram_chat(base, token.strip())
+    if not chat:
+        print("::warning::Telegram: no chat yet — open your bot in Telegram and send it 'hi'")
+        return False
     try:
         r = requests.post(base + "sendMessage", timeout=30, json={"chat_id": chat.strip(), "text": text})
         ok = r.ok and r.json().get("ok")

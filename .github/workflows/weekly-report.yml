@@ -46,7 +46,7 @@ jobs:
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}  # optional: found automatically after you message the bot
         run: python notify.py ${{ inputs.force && '--force' || '' }} --phase "${{ inputs.phase || 'main' }}" --channels "${{ inputs.channels || 'email,whatsapp,telegram' }}"
       - name: Commit the sent marker (reports are never committed)
         run: |
