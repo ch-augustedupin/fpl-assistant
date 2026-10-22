@@ -1,3 +1,5 @@
 6
 7 friday-email
 7 main-email
+8 main-email
+8 main-telegram
