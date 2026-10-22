@@ -75,6 +75,9 @@ and the README example is made up. Keep it that way. The bot commits `state/sent
 - Wildcard squad section in the report whenever the advisor rates WC play/consider, with one line per change
   (`wildcard_pairs` + `why_out`: out → in, xPts gain, money, short reason each way). The user does NOT want a keep
   list in config; `--keep "Name"` exists only for one-off local runs (keeping Rogers in the GW8 WC cost 1.3 xPts).
+- If fpl_report.py crashes, notify.py sends a one-line alert (Telegram + email) once per GW (`<gw> alert` in sent.txt).
+  GW8 lesson: a Wildcard loop reused `o` (the H2H opponent) and every run crashed for 16 h. After ANY edit to
+  fpl_report.py, run the whole script and check its exit code — don't only grep the section you changed.
 - Test: `python notify.py --force --dry-run` locally, or Actions → "Run workflow" with force.
 
 ## Lessons from GW6 (lost 49–54; fixes in `fpl/model.py` and `fpl_report.py`)

@@ -276,11 +276,22 @@ def configured(channel):
     return any(os.environ.get(k) for k in need)
 
 
-def build_report(gw):
+def build_report(gw, record=True, dry=False):
     # the repo and its Actions logs are public: keep the report (names, transfer plans) out of the log
     run = subprocess.run([sys.executable, str(ROOT / "fpl_report.py")], capture_output=True, text=True,
                          encoding="utf-8")
     if run.returncode:
+        error = (run.stderr.strip().splitlines() or ["unknown error"])[-1][:200]
+        if record and not is_sent(gw, "alert"):  # tell the user once per GW instead of failing silently
+            text = (f"⚠ FPL GW{gw}: the report failed to build ({error}). It retries every hour; "
+                    "ask Claude Code to look at it if the report doesn't follow.")
+            ok = False
+            if configured("telegram"):
+                ok = send_telegram(text, None, gw, dry) or ok
+            if configured("email"):
+                ok = send_email(gw, "\n\n" + text, "", dry, subject=f"FPL GW{gw}: report failed") or ok
+            if ok:
+                mark_sent(gw, "alert")
         sys.exit("fpl_report.py failed:\n" + run.stderr[-3000:])
     print(f"Report built for GW{gw}")
     rep = ROOT / "reports"
@@ -343,7 +354,7 @@ def main():
     else:
         return
     record = not (args.force or args.dry_run)
-    report, summary, dec = build_report(gw)
+    report, summary, dec = build_report(gw, record, args.dry_run)
     key = _key()
     delivered = []
 
