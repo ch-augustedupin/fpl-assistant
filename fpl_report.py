@@ -337,13 +337,13 @@ def main():
                 out(f"  {tag} {role} {name(pid):34} {xp1[pid]:4.1f} / {sum(xp[pid]):5.1f}  {model.reason(pid, gws)}"
                     + (f"  [{'; '.join(flags)}]" if flags else ""))
         out(f"Why each change (xPts = predicted points over the next {len(gws)} GWs):")
-        for o, i in wildcard_pairs(players, squad, wc["squad"]):
-            diff = sum(xp[i]) - sum(xp[o])
-            money = players[i]["now_cost"] - sell[o]
+        for p_out, p_in in wildcard_pairs(players, squad, wc["squad"]):  # (don't reuse `o`: it's the H2H opponent)
+            diff = sum(xp[p_in]) - sum(xp[p_out])
+            money = players[p_in]["now_cost"] - sell[p_out]
             cash = f"costs {m(money)} more" if money > 0 else f"frees {m(-money)}" if money < 0 else "same price"
-            out(f"- **{players[o]['web_name']} → {players[i]['web_name']}** ({POS[players[o]['element_type']]}, "
-                f"{diff:+.1f} xPts, {cash}). Out: {why_out(model, players, o, xp, gws, next_gw)}. "
-                f"In: {model.reason(i, gws)}.")
+            out(f"- **{players[p_out]['web_name']} → {players[p_in]['web_name']}** "
+                f"({POS[players[p_out]['element_type']]}, {diff:+.1f} xPts, {cash}). "
+                f"Out: {why_out(model, players, p_out, xp, gws, next_gw)}. In: {model.reason(p_in, gws)}.")
         out()
     out("xPts = expected points from form (recent GWs weigh most), minutes/rotation, injury flags and fixtures. "
         "Check late press-conference news before the deadline.")
