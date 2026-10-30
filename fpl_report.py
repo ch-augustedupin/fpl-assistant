@@ -46,15 +46,17 @@ def parse_overrides(text, players):
 
 
 def free_transfers(history, started):
-    """FTs available for the next deadline: +1 per GW, max 5, chips (WC/FH) don't consume them."""
+    """FTs available for the next deadline: +1 per GW, max 5.
+
+    A Wildcard/Free Hit week keeps the saved FTs but adds no +1 (confirmed by the user after GW8:
+    1 FT before the Wildcard → still 1 FT for GW9)."""
     chip_gws = {c["event"] for c in history["chips"] if c["name"] in ("wildcard", "freehit")}
     ft = 1
     for gw in history["current"]:
         e = gw["event"]
-        if e <= started:
+        if e <= started or e in chip_gws:
             continue
-        if e not in chip_gws:
-            ft = max(ft - gw["event_transfers"], 0)
+        ft = max(ft - gw["event_transfers"], 0)
         ft = min(5, ft + 1)
     return ft
 
