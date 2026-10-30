@@ -25,6 +25,7 @@ import re
 import smtplib
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -135,7 +136,18 @@ def send_email_resend(gw, summary, report, dry, subject=None):
                       json={"from": "FPL Assistant <onboarding@resend.dev>", "to": [to], "subject": subject,
                             "html": email_html(summary, report), "text": summary + "\n\n" + report})
     if r.ok:
-        print(f"Email sent to {to} via Resend")
+        email_id = r.json().get("id", "")
+        print(f"Email sent to {to} via Resend (id {email_id})")
+        # Resend accepting it doesn't mean Gmail delivered it: wait a little and read the delivery status
+        time.sleep(20)
+        try:
+            st = requests.get(f"https://api.resend.com/emails/{email_id}", timeout=30,
+                              headers={"Authorization": f"Bearer {key}"}).json()
+            print(f"Resend delivery status: {st.get('last_event', 'unknown')}")
+            if st.get("last_event") in ("bounced", "complained", "failed"):
+                print("::warning::Resend could not deliver the email: " + str(st.get("last_event")))
+        except requests.RequestException:
+            pass
         return True
     print(f"::warning::Resend answered HTTP {r.status_code}: {r.text[:300]}")
     return False
