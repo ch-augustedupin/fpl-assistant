@@ -9,5 +9,7 @@
 9 friday-telegram
 9 main-email
 9 main-telegram
+10 friday-email
+10 friday-telegram
 10 main-email
 10 main-telegram
