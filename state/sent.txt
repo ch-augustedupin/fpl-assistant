@@ -13,5 +13,7 @@
 10 friday-telegram
 10 main-email
 10 main-telegram
+11 friday-email
+11 friday-telegram
 11 main-email
 11 main-telegram
